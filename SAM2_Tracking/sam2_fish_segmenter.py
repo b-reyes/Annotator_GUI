@@ -6,6 +6,7 @@ import torch
 import numpy as np 
 import pickle 
 from sam2.build_sam import build_sam2_video_predictor
+import pandas as pd 
 
 
 class SAM2FishSegmenter:
@@ -71,7 +72,12 @@ class SAM2FishSegmenter:
 
         if self.configs["save_jpgs"]:
             # Create directory that will store saved frames with masks, if it does not exist 
-            os.makedirs(self.configs["jpg_save_dir"], exist_ok=True)
+            # os.makedirs(self.configs["jpg_save_dir"], exist_ok=True)
+
+            # TODO: should we do this for the user? 
+            # Copy the entire directory
+            import shutil
+            shutil.copytree(self.configs["frame_dir"], self.configs["jpg_save_dir"])
 
         # TODO: determine if this is the best place to put this, might be worth removing
         # Append install directory so we can use sam2_checkpoints and model configurations 
@@ -170,6 +176,52 @@ class SAM2FishSegmenter:
                 labels=labels,
             )
 
+    def add_annotations_v2(self, annotations=None):
+        """
+        Adds provided `annotations` to `self.predictor` using the 
+        `SAM2VideoPredictor` method `add_new_points_or_box`.
+
+        Parameters
+        ----------
+        annotations : Pandas.DataFrame 
+            Pandas DataFrame with index `fishLabel` and columns:
+            `Frame`, `Location`, and `clickType`.
+
+        Raises
+        ------
+        ValueError
+            If `annotations` is not of type `pd.DataFrame`
+
+        Examples
+        --------
+        >>> segmenter.add_annotations(annotations=my_annotations)
+
+        TODO: make sure docstring is good 
+        """
+
+        if not isinstance(annotations, pd.DataFrame):
+            raise TypeError("annotations should be a Pandas DataFrame!")
+
+
+        for index, row in annotations.iterrows():
+
+            # Extract values from the current annotation
+            ann_frame_idx = row['Frame']  # Frame index
+            ann_obj_id = int(index)  # Object ID
+            points = np.array([row['Location']], dtype=np.float32)  # Point coordinates
+            labels = np.array([row['clickType']], dtype=np.int32)  # Positive/Negative click
+
+            # Explicitly call predictor.add_new_points_or_box for annotation
+            # ref: https://github.com/facebookresearch/sam2/blob/2b90b9f5ceec907a1c18123530e92e794ad901a4/sam2/sam2_video_predictor.py#L161
+            # TODO: determine if it is helpful to add out_obj_ids and out_mask_logits as class variables
+            _, out_obj_ids, out_mask_logits = self.predictor.add_new_points_or_box(
+                inference_state=self.inference_state,
+                frame_idx=ann_frame_idx,
+                obj_id=ann_obj_id,
+                points=points,
+                labels=labels,
+            )
+
     def run_propagation(self):
         """
         Propagates the prompts to get the masklet across the video using the 
@@ -219,3 +271,56 @@ class SAM2FishSegmenter:
             # Save frame_masks as pkl file 
             with open(self.configs["masks_dict_file"], "wb") as file:
                     pickle.dump(frame_masks, file)
+
+    def run_propagation_v2(self, start_frame_idx=None, max_frame_num_to_track=None):
+        """
+        Propagates the prompts to get the masklet across the video using the 
+        class predictor and inference state. If configuration variable 
+        `save_jpgs` is True, generates frame JPGs with segmentation masks
+        drawn on them. If configuration variable `save_masks` is True, 
+        creates a dictionary of sparse Tensors representing the masks and 
+        saves these to a pkl file specified by configuration variable 
+        `masks_dict_file`. 
+
+        Examples
+        --------
+        >>> segmenter.run_propagation()
+
+        TODO: make sure docstring is correct 
+        """
+
+        if self.configs["save_jpgs"]:
+            # Generate a list of RGB colors for segmentation masks 
+            colors = plot_utils.get_spaced_colors(100)
+
+        # if self.configs["save_masks"]:
+        #     # Initialize dictionary of masks for each frame
+        #     frame_masks = {}
+
+        # Perform prediction of masklets across video frames 
+        # ref: https://github.com/facebookresearch/sam2/blob/2b90b9f5ceec907a1c18123530e92e794ad901a4/sam2/sam2_video_predictor.py#L546
+        for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(self.inference_state, 
+                                                                                             start_frame_idx=start_frame_idx, 
+                                                                                             max_frame_num_to_track=max_frame_num_to_track):
+
+            # Create Bool mask and delete unneeded tensor
+            bool_masks = out_mask_logits > 0.0
+            del out_mask_logits
+
+            # There's an extra dimension (1) to the masks, remove it
+            bool_masks = bool_masks.squeeze(1)
+
+            # if self.configs["save_masks"]: 
+            #     # Convert mask tensor to sparse format and store it
+            #     frame_masks[out_frame_idx] = bool_masks.to_sparse().cpu()
+
+            if self.configs["save_jpgs"]: 
+                utils.draw_and_save_frame_seg_v2(bool_masks=bool_masks, img_save_dir=self.configs["jpg_save_dir"], 
+                                              frame_paths=self.frame_paths, out_frame_idx=out_frame_idx, 
+                                              out_obj_ids=out_obj_ids, colors=colors, font_size=self.configs["font_size"], 
+                                              font_color=self.configs["font_color"], alpha=self.configs["alpha"])
+
+        # if self.configs["save_masks"]: 
+        #     # Save frame_masks as pkl file 
+        #     with open(self.configs["masks_dict_file"], "wb") as file:
+        #             pickle.dump(frame_masks, file)

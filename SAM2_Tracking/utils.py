@@ -11,6 +11,7 @@ from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import pandas as pd 
 
 def read_config_yaml(config_path):
     """
@@ -46,7 +47,7 @@ def filter_annotations(annotations_file, fps, SAM2_start):
             if key != "Fish_Fam":
                 if key == "Frame":
                     frame_value = (value - SAM2_start - 1) / (fps / 3)
-                    #Check if frame_valu    e is a decimal
+                    #Check if frame_value is a decimal
                     if not frame_value.is_integer():
                         rounded_frame_value = round(frame_value)
                         print(f"Warning: Frame value {frame_value:.2f} was rounded to {rounded_frame_value}")
@@ -57,6 +58,66 @@ def filter_annotations(annotations_file, fps, SAM2_start):
         annotations_filtered.append(filtered_ann)
 
     return annotations_filtered    
+
+def filter_annotations_v2(annotations_file=None, fps=None, SAM2_start=None):
+    """
+    TODO: fill in the details here 
+
+    """
+
+    # Read in npy file with annotations and convert it to a Pandas df 
+    annotations = np.load(annotations_file, allow_pickle=True)
+
+    df = pd.DataFrame(list(annotations))
+
+    if 'Fish_Fam' in df.columns:
+        # Drop Fish_Fam column 
+        df = df.drop(columns=['Fish_Fam'])
+
+    # Correct annotation frame value, so it coincides with video frame value
+    df['Frame'] = (df['Frame'] - SAM2_start - 1) / (fps / 3)
+
+    # Round and convert Frame value to an integer 
+    # TODO: do we need to provide a warning that a rounding was necessary? 
+    df['Frame'] = round(df['Frame']).astype(int)
+
+    return df 
+
+def get_frame_chunks_df(df=None):
+    """
+    TODO: fill in details 
+
+    modifies df in place (makes fishLabel the index and drops clickType of 3 and 4)
+    creates `fish_frame_chunks`
+    """
+
+    # Modify the incoming df so it has fishLabel as its index
+    # TODO: should we do this inplace? 
+    df = df.set_index('fishLabel')
+
+    # For each fishLabel get Frames where the fish enters the scene 
+    enter_frame = df[df['clickType'] == 3]['Frame']
+
+    # TODO: this is temporary so we can test cases where duplication happens
+    if enter_frame.index.duplicated().any():
+        raise RuntimeError("Provided annotations have more than 1 enter frame for a fish label!")
+    
+    # For each fishLabel get Frames where the fish exits the scene 
+    exit_frame = df[df['clickType'] == 4]['Frame']
+
+    # TODO: this is temporary so we can test cases where duplication happens
+    if exit_frame.index.duplicated().any():
+        raise RuntimeError("Provided annotations have more than 1 exit frame for a fish label!")
+
+    # Concatenate columns to improve ease of use later
+    fish_frame_chunks = pd.concat([enter_frame, exit_frame], axis=1)
+    fish_frame_chunks.columns = ['EnterFrame', 'ExitFrame']
+
+    # Drop rows that have clickType of 3 or 4 from input df 
+    # TODO: should we do this inplace? 
+    df = df[~df['clickType'].isin([3, 4])]
+
+    return fish_frame_chunks, df
 
 def get_jpg_paths(jpg_dir):
     """
@@ -142,6 +203,73 @@ def draw_and_save_frame_seg(bool_masks, img_save_dir, frame_paths, out_frame_idx
 
     # Get frame name using the stem of the frame JPG
     frame_id = Path(frame_paths[out_frame_idx]).stem
+
+    # Save the final image
+    img_pil.save(img_save_dir + f"/{frame_id}.jpg")
+
+def draw_and_save_frame_seg_v2(bool_masks, img_save_dir, frame_paths, out_frame_idx, out_obj_ids, colors, 
+                               font_size=75, font_color="red", alpha=0.6):
+    """
+    Draws segmentation masks on top of the frame and saves 
+    the generated image to `img_save_dir`. 
+
+    Parameters
+    ----------
+    bool_masks : Tensor of bools
+        A tensor of shape (number of masks, frame pixel height, frame pixel width)
+        representing the generated segmentation masks
+    img_save_dir : str
+        The path where we want to save the generated image
+    frame_paths : list of str
+        A list of JPG paths representing the frames 
+    out_frame_idx : int
+        Index representing the frame we predicted the masks for 
+    out_obj_ids : list of int
+        A list of integers representing the ids for each mask
+    colors : list of tuples of ints
+        A list of tuples representing RGB colors for each segmentation mask
+    font_size : int
+        Font size for drawn object IDs
+    font_color : str
+        Color of font for the drawn object IDs
+    alpha : float 
+        Alpha value for the segmentation masks 
+
+    Returns
+    -------
+    list
+        List of sorted JPG paths
+
+    TODO: make sure docstrings are good 
+    """    
+
+    # Get frame name using the stem of the frame JPG
+    frame_id = Path(frame_paths[out_frame_idx]).stem
+
+    # Draw each mask on top of image representing the frame
+    # image_w_seg = decode_image(frame_paths[out_frame_idx])
+    image_w_seg = decode_image(img_save_dir + f"/{frame_id}.jpg") # TODO: clean 
+    for i in range(bool_masks.shape[0]):
+
+        # Only draw masks that contain True values 
+        if bool_masks[i].any():
+            image_w_seg = draw_segmentation_masks(image_w_seg, bool_masks[i], colors=colors[out_obj_ids[i]], alpha=alpha)
+
+    # Convert image with drawn segmentation masks to PIL Image
+    to_pil = transforms.ToPILImage()
+    img_pil = to_pil(image_w_seg)
+
+    # Draw text annotations
+    draw = ImageDraw.Draw(img_pil)
+    font = ImageFont.load_default(size=font_size)
+
+    # Compute centroids for all masks so we can place the object ID on the centroid 
+    centroids = [plot_utils.get_centroid(mask) for mask in bool_masks]
+
+    # Draw the object ID at the centroid
+    for centroid, label in zip(centroids, out_obj_ids):
+        if centroid:
+            draw.text(centroid, str(label), fill=font_color, font=font)
 
     # Save the final image
     img_pil.save(img_save_dir + f"/{frame_id}.jpg")
