@@ -1,8 +1,8 @@
 # Specifying SAM2 install directory location 
 sam2_install_dir: "/path/to/sam2/sam2/"
 
-# Directory containing JPGs corresponding to the frames of the video
-frame_dir: "/path/to/frames"
+# tar.gz file containing JPGs corresponding to the frames of the video
+frame_tar: "/path/to/frames"
 
 ######################################################
 # build_sam2_video_predictor specific configurations #
@@ -53,22 +53,12 @@ offload_video_to_cpu: True
 # Turning this option on can save GPU memory
 offload_state_to_cpu: True
 
-# Lazy load images, can conserve memory, if it is needed
-async_loading_frames: False
-
 ###########################################
 # run_propagation specific configurations #
 ###########################################
 
-# If True, draw segmentation masks on top of frames and save the generated JPGs to jpg_save_dir
-# Note that jpg_save_dir must have all frames in it, if copy_frame_dir is False
-save_jpgs: True
-
-# If True, will copy the directory specified by frame_dir to jpg_save_dir at runtime 
-copy_frame_dir: True
-
-# The full path to the directory we want to save frames with segmentation masks drawn on them
-jpg_save_dir: './generated_jpgs'
+# The full path to the directory we will extract frame_tar to
+extracted_tar_dir: './generated_jpgs'
 
 # If True, save the generated masks in a dictionary with sparse tensor values and save it as 
 # a pkl file defined by masks_dict_file

@@ -3,6 +3,7 @@ import plot_utils
 import shutil
 import os 
 import sys 
+import tarfile
 import torch 
 import numpy as np 
 import pandas as pd 
@@ -71,10 +72,10 @@ class SAM2FishSegmenter:
         else:
             raise TypeError("configs was not a str or dict!")
 
-        if self.configs["copy_frame_dir"]:
-            # Copy the entire directory # TODO: should we be doing this for the user? 
-            print(f"Since copy_frame_dir=True, copying directory {self.configs["frame_dir"]} to {self.configs["jpg_save_dir"]} ...")
-            shutil.copytree(self.configs["frame_dir"], self.configs["jpg_save_dir"], dirs_exist_ok=True)
+        # Extract frame_tar to extracted_tar_dir 
+        with tarfile.open(self.configs["frame_tar"], 'r:gz') as tar:
+            # Extract all contents to extracted_tar_dir 
+            tar.extractall(path=self.configs["extracted_tar_dir"])
 
         # TODO: determine if this is the best place to put this, might be worth removing
         # Append install directory so we can use sam2_checkpoints and model configurations 
@@ -99,32 +100,31 @@ class SAM2FishSegmenter:
     def set_inference_state(self):
         """
         Obtains the inference state for `self.predictor` for a provided 
-        video path (specified by `self.configs["frame_dir"]`) and sets 
-        it as `self.inference_state`. Additionally, sets 
+        video path (specified by `self.configs["extracted_tar_dir"]`) 
+        and sets it as `self.inference_state`. Additionally, sets 
         `self.frame_paths`, which are all of the JPG paths representing 
         the frames.
 
         Raises
         ------
         ValueError
-            If `self.configs["frame_dir"]` was not of type `str`. 
+            If `self.configs["extracted_tar_dir"]` was not of type `str`. 
 
         Examples
         --------
         >>> segmenter.set_inference_state()
         """
 
-        if not isinstance(self.configs["frame_dir"], str): 
-            raise TypeError(f"config frame_dir was not of type str!")
+        if not isinstance(self.configs["extracted_tar_dir"], str): 
+            raise TypeError(f"config extracted_tar_dir was not of type str!")
 
         # Gather all the JPG paths representing the frames 
-        self.frame_paths = utils.get_jpg_paths(self.configs["frame_dir"])
+        self.frame_paths = utils.get_jpg_paths(self.configs["extracted_tar_dir"])
 
         # ref: https://github.com/facebookresearch/sam2/blob/2b90b9f5ceec907a1c18123530e92e794ad901a4/sam2/sam2_video_predictor.py#L42
-        self.inference_state = self.predictor.init_state(video_path=self.configs["frame_dir"], 
+        self.inference_state = self.predictor.init_state(video_path=self.configs["extracted_tar_dir"], 
                                                          offload_video_to_cpu=self.configs["offload_video_to_cpu"], 
-                                                         offload_state_to_cpu=self.configs["offload_state_to_cpu"], 
-                                                         async_loading_frames=self.configs["async_loading_frames"])
+                                                         offload_state_to_cpu=self.configs["offload_state_to_cpu"])
 
 
     def add_annotations(self, annotations=None):
@@ -175,12 +175,11 @@ class SAM2FishSegmenter:
     def get_masks(self, frame_masks=None, start_frame_idx=None, max_frame_num_to_track=None):
         """
         Propagates the prompts to get the masklet across the video using the 
-        class predictor and inference state. If configuration variable 
-        `save_jpgs` is True, overwrites the JPGs in `jpg_save_dir` with 
-        segmentation masks drawn on them. If configuration variable `save_masks` 
-        is True, modifies the the frame key of `frame_masks` by adding a 
-        dictionary key corresponding to the `obj_id` with value as a 
-        sparse tensor representing the mask. 
+        class predictor and inference state. Overwrites the JPGs in 
+        `extracted_tar_dir` with segmentation masks drawn on them. If 
+        configuration variable `save_masks` is True, modifies the frame 
+        key of `frame_masks` by adding a dictionary key corresponding to 
+        the `obj_id` with value as a sparse tensor representing the mask. 
 
         Parameters
         ----------
@@ -204,9 +203,8 @@ class SAM2FishSegmenter:
         >>> segmenter.run_propagation(start_frame_idx=0, max_frame_num_to_track=100)
         """
 
-        if self.configs["save_jpgs"]:
-            # Generate a list of RGB colors for segmentation masks 
-            colors = plot_utils.get_spaced_colors(100)
+        # Generate a list of RGB colors for segmentation masks 
+        colors = plot_utils.get_spaced_colors(100)
 
         # Perform prediction of masklets across video frames 
         # ref: https://github.com/facebookresearch/sam2/blob/2b90b9f5ceec907a1c18123530e92e794ad901a4/sam2/sam2_video_predictor.py#L546
@@ -226,11 +224,10 @@ class SAM2FishSegmenter:
                 for obj_id in out_obj_ids:
                     frame_masks[out_frame_idx][obj_id] = bool_masks.to_sparse().cpu()
 
-            if self.configs["save_jpgs"]: 
-                utils.draw_and_save_frame_seg(bool_masks=bool_masks, jpg_save_dir=self.configs["jpg_save_dir"], 
-                                              frame_paths=self.frame_paths, out_frame_idx=out_frame_idx, 
-                                              out_obj_ids=out_obj_ids, colors=colors, font_size=self.configs["font_size"], 
-                                              font_color=self.configs["font_color"], alpha=self.configs["alpha"])
+            utils.draw_and_save_frame_seg(bool_masks=bool_masks, jpg_save_dir=self.configs["extracted_tar_dir"], 
+                                            frame_paths=self.frame_paths, out_frame_idx=out_frame_idx, 
+                                            out_obj_ids=out_obj_ids, colors=colors, font_size=self.configs["font_size"], 
+                                            font_color=self.configs["font_color"], alpha=self.configs["alpha"])
 
         if self.configs["save_masks"]: 
             return frame_masks
