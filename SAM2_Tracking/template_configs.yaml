@@ -2,7 +2,7 @@
 sam2_install_dir: "/path/to/sam2/sam2/"
 
 # tar.gz file containing JPGs corresponding to the frames of the video
-frame_tar: "/path/to/frames"
+frame_tar_file: "/path/to/frames"
 
 ######################################################
 # build_sam2_video_predictor specific configurations #
@@ -57,7 +57,7 @@ offload_state_to_cpu: True
 # run_propagation specific configurations #
 ###########################################
 
-# The full path to the directory we will extract frame_tar to
+# The full path to the directory we will extract frame_tar_file to
 extracted_tar_dir: './generated_jpgs'
 
 # If True, save the generated masks in a dictionary with sparse tensor values and save it as 

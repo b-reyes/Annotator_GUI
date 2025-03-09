@@ -35,7 +35,8 @@ class SAM2FishSegmenter:
 
     def __init__(self, configs=None, device=None):
         """
-        Initializes the predictor model and sets `self.configs`
+        Initializes the predictor model, sets `self.configs`, and 
+        extracts `frame_tar_file` to `extracted_tar_dir`.  
 
         Parameters
         ----------
@@ -72,9 +73,8 @@ class SAM2FishSegmenter:
         else:
             raise TypeError("configs was not a str or dict!")
 
-        # Extract frame_tar to extracted_tar_dir 
-        with tarfile.open(self.configs["frame_tar"], 'r:gz') as tar:
-            # Extract all contents to extracted_tar_dir 
+        # Extract frame_tar_file to extracted_tar_dir 
+        with tarfile.open(self.configs["frame_tar_file"], 'r:gz') as tar:
             tar.extractall(path=self.configs["extracted_tar_dir"])
 
         # TODO: determine if this is the best place to put this, might be worth removing
@@ -200,7 +200,8 @@ class SAM2FishSegmenter:
 
         Examples
         --------
-        >>> segmenter.run_propagation(start_frame_idx=0, max_frame_num_to_track=100)
+        >>> segmenter.run_propagation(frame_masks=my_dict, 
+                                      start_frame_idx=0, max_frame_num_to_track=100)
         """
 
         # Generate a list of RGB colors for segmentation masks 
@@ -224,6 +225,7 @@ class SAM2FishSegmenter:
                 for obj_id in out_obj_ids:
                     frame_masks[out_frame_idx][obj_id] = bool_masks.to_sparse().cpu()
 
+            # Draw generated masks on corresponding JPG frames
             utils.draw_and_save_frame_seg(bool_masks=bool_masks, jpg_save_dir=self.configs["extracted_tar_dir"], 
                                             frame_paths=self.frame_paths, out_frame_idx=out_frame_idx, 
                                             out_obj_ids=out_obj_ids, colors=colors, font_size=self.configs["font_size"], 
@@ -236,9 +238,10 @@ class SAM2FishSegmenter:
         """
         Runs entire workflow: setting the inference state,
         collecting and adding annotations, getting SAM2
-        provided masks, and saving masks. This function 
-        expects annotations that have `labels_name` with 
-        enter and exit values of 3 and 4, respectively.
+        provided masks, drawing masks on JPGs, and saving 
+        masks. This function expects annotations that have 
+        `labels_name` with enter and exit values of 3 and 4, 
+        respectively.
         """
 
         # Set inference state for SAM2
